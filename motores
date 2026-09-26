@@ -1,0 +1,16 @@
+import board
+import pwmio
+import time
+
+motor_a = pwmio.PWMOut(board.IO12, frequency=50, duty_cycle=0)
+motor_b = pwmio.PWMOut(board.IO14, frequency=50, duty_cycle=0)
+
+try:
+    time.sleep(3)  # Espera antes de mover
+    motor_a.duty_cycle = int(65535 * 0.30)
+    time.sleep(2)
+finally:
+    motor_a.duty_cycle = 0
+    motor_b.duty_cycle = 0
+    motor_a.deinit()
+    motor_b.deinit()
