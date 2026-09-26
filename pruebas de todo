@@ -1,0 +1,125 @@
+"""Diagnostico CircuitPython para IdeaBoard / Sumobot.
+Ejecutar desde Thonny. No requiere bibliotecas externas.
+Ruedas levantadas; corregir cualquier apagado electrico antes de usar.
+"""
+import board
+import analogio
+import digitalio
+import pwmio
+import pulseio
+import time
+
+IR_PINS = (board.IO36, board.IO39, board.IO34, board.IO35)
+IR_NAMES = ("SEN1 frente izq", "SEN2 frente der", "SEN3 atras izq", "SEN4 atras der")
+THRESHOLDS = (10000, 10000, 10000, 10000)  # Referencia, NO calibracion medida
+POWER = 0.30
+DURATION = 2.0
+
+
+def stop(outputs):
+    for output in outputs:
+        output.duty_cycle = 0
+
+
+def test_motor(outputs, button, left, right):
+    stop(outputs)
+    print("Ruedas levantadas. Inicio en 3 s. BOOT cancela o detiene.")
+    try:
+        until = time.monotonic() + 3.0
+        while time.monotonic() < until:
+            if not button.value:
+                print("Cancelado")
+                return
+            time.sleep(0.01)
+        for i, value in enumerate((left, right)):
+            duty = int(min(abs(value), POWER) * 65535)
+            outputs[2*i if value >= 0 else 2*i+1].duty_cycle = duty
+        until = time.monotonic() + DURATION
+        while time.monotonic() < until:
+            if not button.value:
+                break
+            time.sleep(0.01)
+    finally:
+        stop(outputs)
+    print("Motores detenidos. Confirma visualmente giro y sentido.")
+
+
+def distance_cm(trigger, echo):
+    echo.pause()
+    echo.clear()
+    echo.resume()
+    try:
+        trigger.value = True
+        time.sleep(0.00001)
+        trigger.value = False
+        deadline = time.monotonic() + 0.03
+        while not len(echo) and time.monotonic() < deadline:
+            pass
+        if not len(echo):
+            return None
+        width = echo.popleft()
+        return width * 0.01715 if 100 <= width <= 26000 else None
+    finally:
+        trigger.value = False
+        echo.pause()
+
+
+def main():
+    outputs = []
+    sensors = []
+    resources = []
+    try:
+        for pin in (board.IO12, board.IO14, board.IO13, board.IO15):
+            output = pwmio.PWMOut(pin, frequency=50, duty_cycle=0)
+            outputs.append(output)
+            resources.append(output)
+        for pin in IR_PINS:
+            sensor = analogio.AnalogIn(pin)
+            sensors.append(sensor)
+            resources.append(sensor)
+        button = digitalio.DigitalInOut(board.IO0)
+        resources.append(button)
+        button.switch_to_input(pull=digitalio.Pull.UP)
+        trigger = digitalio.DigitalInOut(board.IO25)
+        resources.append(trigger)
+        trigger.switch_to_output(value=False)
+        echo = pulseio.PulseIn(board.IO26, maxlen=2, idle_state=False)
+        resources.append(echo)
+        echo.pause()
+        while True:
+            stop(outputs)
+            print("\nDIAGNOSTICO SUMOBOT - motores detenidos")
+            print("s: cuatro IR y sonar durante 10 s")
+            print("1: M1 adelante | 2: M1 atras")
+            print("3: M2 adelante | 4: M2 atras | 5: ambos adelante")
+            print("q: terminar. Cada motor: 30%, 2 s. BOOT detiene la prueba.")
+            choice = input("Opcion + Enter: ").strip().lower()
+            if choice == "q":
+                break
+            if choice == "s":
+                print("Acerca un objeto al sonar; alterna negro/blanco bajo cada IR.")
+                until = time.monotonic() + 10.0
+                while time.monotonic() < until:
+                    if not button.value:
+                        break
+                    for i, sensor in enumerate(sensors):
+                        value = sensor.value
+                        print(IR_NAMES[i], value, "BLANCO" if value < THRESHOLDS[i] else "NEGRO")
+                    distance = distance_cm(trigger, echo)
+                    print("SONAR:", "SIN ECO" if distance is None else "%.1f cm" % distance)
+                    time.sleep(0.25)
+                continue
+            movements = {"1": (POWER, 0), "2": (-POWER, 0),
+                         "3": (0, POWER), "4": (0, -POWER), "5": (POWER, POWER)}
+            if choice in movements:
+                test_motor(outputs, button, *movements[choice])
+            else:
+                print("Opcion desconocida; motores detenidos.")
+    finally:
+        stop(outputs)
+        for resource in reversed(resources):
+            resource.deinit()
+
+
+if __name__ == "__main__":
+    m
